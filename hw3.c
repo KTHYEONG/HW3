@@ -1,108 +1,80 @@
 #include <stdio.h>
-#include <unistd.h>
 #include <stdlib.h>
-#include <fcntl.h>
-#include <signal.h>
+#include <unistd.h>
 #include <sys/wait.h>
-#include <string.h>
+#include <time.h>
 
-#define TMP_FILE "temp_file.txt"
+#define ARRAY_SIZE 10
+
+void processArray(int start, int end, int *array, int processNum)
+{
+    printf("Process %d is calculating elements from %d to %d\n", processNum, start, end);
+    for (int i = start; i < end; i++)
+    {
+        array[i] *= 2; // 배열의 각 요소를 2배로 변경 (임의의 처리 예시)
+    }
+}
 
 int main()
 {
-    int pid;
-    int fd;
-    int tmp_fd;
-    char filename[256];
+    int data[ARRAY_SIZE];
+    int numChildren;
 
-    signal(SIGINT, SIG_IGN);
-    signal(SIGQUIT, SIG_IGN);
-
-    printf("Enter file names (type 'finish' to sort, 'exit' to end):\n");
-
-    tmp_fd = open(TMP_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (tmp_fd == -1)
+    // 배열 초기화
+    for (int i = 0; i < ARRAY_SIZE; i++)
     {
-        perror("open");
-        exit(1);
+        data[i] = i;
     }
 
-    while (1)
+    // 사용자로부터 자식 프로세스의 수 입력 받기
+    printf("Enter the number of child processes: ");
+    scanf("%d", &numChildren);
+
+    // 병렬 처리를 사용하여 배열을 처리하는 부분
+    clock_t parallelStart = clock();
+
+    pid_t pid;
+
+    for (int i = 0; i < numChildren; i++)
     {
-        printf("Enter file name or finish: ");
-        scanf("%255s", filename);
+        pid = fork();
 
-        if (strcmp(filename, "finish") == 0)
+        if (pid == -1)
         {
-            close(tmp_fd);
-
-            if ((pid = fork()) == -1)
-            {
-                perror("fork");
-                exit(1);
-            }
-
-            if (pid == 0)
-            {
-                fd = open(TMP_FILE, O_RDONLY);
-                if (fd == -1)
-                {
-                    perror("open");
-                    exit(1);
-                }
-
-                if (dup2(fd, 0) == -1)
-                {
-                    perror("dup2");
-                    close(fd);
-                    exit(1);
-                }
-                close(fd);
-
-                execlp("sort", "sort", NULL);
-                perror("execlp");
-                exit(1);
-            }
-
-            if (pid != 0)
-            {
-                wait(NULL);
-
-                remove(TMP_FILE);
-
-                tmp_fd = open(TMP_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                if (tmp_fd == -1)
-                {
-                    perror("open");
-                    exit(1);
-                }
-
-                printf("Enter file names (type 'finish' to sort, 'exit' to end):\n");
-                continue;
-            }
-        }
-        else if (strcmp(filename, "exit") == 0)
-            break;
-
-        fd = open(filename, O_RDONLY);
-        if (fd == -1)
-        {
-            perror("open");
-            close(tmp_fd);
-            exit(1);
+            perror("Error in fork");
+            exit(EXIT_FAILURE);
         }
 
-        char buffer[4096];
-        ssize_t bytesRead;
-        while ((bytesRead = read(fd, buffer, sizeof(buffer))) > 0)
-        {
-            write(tmp_fd, buffer, bytesRead);
-        }
+        if (pid == 0)
+        { // 자식 프로세스
+            int start = i * (ARRAY_SIZE / numChildren);
+            int end = (i + 1) * (ARRAY_SIZE / numChildren);
 
-        close(fd);
+            processArray(start, end, data, i + 1);
+
+            exit(EXIT_SUCCESS);
+        }
     }
 
-    close(tmp_fd);
+    // 부모 프로세스는 모든 자식 프로세스의 종료를 기다림
+    for (int i = 0; i < numChildren; i++)
+    {
+        wait(NULL);
+    }
+
+    clock_t parallelEnd = clock();
+    double parallelTime = (double)(parallelEnd - parallelStart) / CLOCKS_PER_SEC;
+
+    // 순차 처리를 사용하여 배열을 처리하는 부분
+    clock_t sequentialStart = clock();
+    for (int i = 0; i < ARRAY_SIZE; i++)
+    {
+        data[i] *= 2;
+    }
+
+    // 결과 출력
+    printf("Parallel processing time: %.6f seconds\n", parallelTime);
+    printf("Sequential processing time: %.6f seconds\n", sequentialTime);
 
     return 0;
 }
