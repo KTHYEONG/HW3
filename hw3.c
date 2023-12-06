@@ -3,78 +3,211 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <limits.h>
+#include <curses.h>
 
-#define ARRAY_SIZE 10
-
-void processArray(int start, int end, int *array, int processNum)
+// Function to initialize a matrix with random values
+void initializeMatrix(int matrixSize, int matrix[matrixSize][matrixSize])
 {
-    printf("Process %d is calculating elements from %d to %d\n", processNum, start, end);
+    srand(time(NULL));
+
+    for (int i = 0; i < matrixSize; i++)
+    {
+        for (int j = 0; j < matrixSize; j++)
+        {
+            matrix[i][j] = rand() % 100; // Assign random values for simplicity
+        }
+    }
+}
+
+// Function to perform matrix multiplication for a specific range
+void processMatrixMultiplication(int start, int end, int matrixSize, int result[matrixSize][matrixSize], int processNum, FILE *outputFile)
+{
+    clock_t startTime, endTime;
+
+    if (processNum != 0)
+        printf("Child Process %d is multiplying matrices from row %d to %d\n", processNum, start, end - 1);
+    else
+        printf("Parent Process is multiplying matrices from row %d to %d\n", start, end - 1);
+
+    startTime = clock(); // Record the start time
+
+    // Assume two matrices A and B
+    int matrixA[matrixSize][matrixSize];
+    int matrixB[matrixSize][matrixSize];
+
+    // Initialize matrices (for simplicity, you can modify this part if you have specific matrices)
+    initializeMatrix(matrixSize, matrixA);
+    initializeMatrix(matrixSize, matrixB);
+
+    // Perform matrix multiplication and store the result in the specified range
     for (int i = start; i < end; i++)
     {
-        array[i] *= 2; // 배열의 각 요소를 2배로 변경 (임의의 처리 예시)
+        for (int j = 0; j < matrixSize; j++)
+        {
+            result[i][j] = 0;
+            for (int k = 0; k < matrixSize; k++)
+            {
+                result[i][j] += matrixA[i][k] * matrixB[k][j];
+            }
+        }
+    }
+
+    endTime = clock(); // Record the end time
+    double elapsedTime = (double)(endTime - startTime) / CLOCKS_PER_SEC;
+
+    sleep(1);
+
+    if (processNum != 0)
+    {
+        printf("Child %d took %.6f seconds!\n", processNum, elapsedTime);
+
+        // Append the results to the common output file
+        for (int i = start; i < end; i++)
+        {
+            for (int j = 0; j < matrixSize; j++)
+            {
+                fprintf(outputFile, "%d ", result[i][j]);
+            }
+            fprintf(outputFile, "\n");
+        }
+    }
+    else
+    {
+        printf("Parent took %.6f seconds!\n", elapsedTime);
     }
 }
 
 int main()
 {
-    int data[ARRAY_SIZE];
     int numChildren;
-
-    // 배열 초기화
-    for (int i = 0; i < ARRAY_SIZE; i++)
-    {
-        data[i] = i;
-    }
-
-    // 사용자로부터 자식 프로세스의 수 입력 받기
-    printf("Enter the number of child processes: ");
-    scanf("%d", &numChildren);
-
-    // 병렬 처리를 사용하여 배열을 처리하는 부분
-    clock_t parallelStart = clock();
-
     pid_t pid;
 
-    for (int i = 0; i < numChildren; i++)
-    {
-        pid = fork();
+    char restartChoice; // Variable to store user's choice for restarting the program
 
-        if (pid == -1)
+    do
+    {
+        // 사용자로부터 matrix 사이즈 및 자식 프로세스의 수 입력 받기
+        int matrixSize;
+        printf("Enter the matrix size: ");
+        scanf("%d", &matrixSize);
+
+        printf("Enter the number of child processes: ");
+        scanf("%d", &numChildren);
+
+        FILE *outputFile = fopen("output.txt", "a");
+        if (outputFile == NULL)
         {
-            perror("Error in fork");
+            perror("Error opening output file");
             exit(EXIT_FAILURE);
         }
 
-        if (pid == 0)
-        { // 자식 프로세스
-            int start = i * (ARRAY_SIZE / numChildren);
-            int end = (i + 1) * (ARRAY_SIZE / numChildren);
+        int resultMatrix[matrixSize][matrixSize];
 
-            processArray(start, end, data, i + 1);
+        for (int i = 0; i < numChildren; i++)
+        {
+            pid = fork();
 
-            exit(EXIT_SUCCESS);
+            if (pid == -1)
+            {
+                perror("Error in fork");
+                exit(EXIT_FAILURE);
+            }
+
+            if (pid == 0)
+            { // 자식 프로세스
+                int start = i * (matrixSize / numChildren);
+                int end = (i + 1) * (matrixSize / numChildren);
+
+                if (i == numChildren - 1) // If it's the last child process
+                {
+                    end = matrixSize;
+                }
+
+                processMatrixMultiplication(start, end, matrixSize, resultMatrix, i + 1, outputFile);
+
+                fclose(outputFile); // Close the file in the child process
+                exit(EXIT_SUCCESS);
+            }
         }
-    }
 
-    // 부모 프로세스는 모든 자식 프로세스의 종료를 기다림
-    for (int i = 0; i < numChildren; i++)
-    {
-        wait(NULL);
-    }
+        // 부모 프로세스는 나머지 부분의 행렬 곱셈을 수행
+        if (pid > 0)
+        {
+            // Wait for all child processes to finish
+            for (int i = 0; i < numChildren; i++)
+            {
+                wait(NULL);
+            }
 
-    clock_t parallelEnd = clock();
-    double parallelTime = (double)(parallelEnd - parallelStart) / CLOCKS_PER_SEC;
+            processMatrixMultiplication(0, matrixSize, matrixSize, resultMatrix, 0, outputFile);
 
-    // 순차 처리를 사용하여 배열을 처리하는 부분
-    clock_t sequentialStart = clock();
-    for (int i = 0; i < ARRAY_SIZE; i++)
-    {
-        data[i] *= 2;
-    }
+            // Find and print the minimum, maximum, and average values in resultMatrix
+            int minVal = INT_MAX;
+            int maxVal = INT_MIN;
+            int sum = 0;
 
-    // 결과 출력
-    printf("Parallel processing time: %.6f seconds\n", parallelTime);
-    printf("Sequential processing time: %.6f seconds\n", sequentialTime);
+            for (int i = 0; i < matrixSize; i++)
+            {
+                for (int j = 0; j < matrixSize; j++)
+                {
+                    if (resultMatrix[i][j] < minVal)
+                    {
+                        minVal = resultMatrix[i][j];
+                    }
+                    if (resultMatrix[i][j] > maxVal)
+                    {
+                        maxVal = resultMatrix[i][j];
+                    }
+                    sum += resultMatrix[i][j];
+                }
+            }
+
+            double average = (double)sum / (matrixSize * matrixSize);
+
+            endwin();
+
+            initscr();
+
+            move(20, 30);
+            printw("Minimum value: %d", minVal);
+            refresh();
+            sleep(1);
+
+            move(21, 30);
+            printw("Maximum value: %d", maxVal);
+            refresh();
+            sleep(1);
+
+            move(22, 30);
+            printw("Average value: %.2f", average);
+            refresh();
+            sleep(1);
+
+            standout();
+            move(25, 30);
+            printw("Press 'y' to restart, 'n' to exit ...");
+            refresh();
+            standend();
+
+            restartChoice = getch(); // Get user's choice for restarting or exiting
+
+            erase();
+            endwin();
+
+            fclose(outputFile); // Close the file in the parent process
+
+            // Delete the file after displaying its contents
+            if (remove("output.txt") == -1)
+            {
+                perror("Error deleting the file");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        printf("\n");
+
+    } while (restartChoice == 'y');
 
     return 0;
 }
