@@ -3,107 +3,81 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <time.h>
-#include <limits.h>
+#include <signal.h>
 #include <curses.h>
 
-// Function to initialize a matrix with random values
-void initializeMatrix(int matrixSize, int matrix[matrixSize][matrixSize])
+int countElements(FILE *file)
 {
-    srand(time(NULL));
+    int count = 0;
+    int value;
 
-    for (int i = 0; i < matrixSize; i++)
+    while (fscanf(file, "%d", &value) == 1)
     {
-        for (int j = 0; j < matrixSize; j++)
-        {
-            matrix[i][j] = rand() % 100; // Assign random values for simplicity
-        }
+        count++;
     }
+
+    return count;
 }
 
-// Function to perform matrix multiplication for a specific range
-void processMatrixMultiplication(int start, int end, int matrixSize, int result[matrixSize][matrixSize], int processNum, FILE *outputFile)
+int sequentialSearch(int *data, int start, int end, int goal)
 {
-    clock_t startTime, endTime;
-
-    if (processNum != 0)
-        printf("Child Process %d is multiplying matrices from row %d to %d\n", processNum, start, end - 1);
-    else
-        printf("Parent Process is multiplying matrices from row %d to %d\n", start, end - 1);
-
-    startTime = clock(); // Record the start time
-
-    // Assume two matrices A and B
-    int matrixA[matrixSize][matrixSize];
-    int matrixB[matrixSize][matrixSize];
-
-    // Initialize matrices (for simplicity, you can modify this part if you have specific matrices)
-    initializeMatrix(matrixSize, matrixA);
-    initializeMatrix(matrixSize, matrixB);
-
-    // Perform matrix multiplication and store the result in the specified range
     for (int i = start; i < end; i++)
     {
-        for (int j = 0; j < matrixSize; j++)
+        if (data[i] == goal)
         {
-            result[i][j] = 0;
-            for (int k = 0; k < matrixSize; k++)
-            {
-                result[i][j] += matrixA[i][k] * matrixB[k][j];
-            }
+            return i; // Return the index if found
         }
     }
-
-    endTime = clock(); // Record the end time
-    double elapsedTime = (double)(endTime - startTime) / CLOCKS_PER_SEC;
-
-    sleep(1);
-
-    if (processNum != 0)
-    {
-        printf("Child %d took %.6f seconds!\n", processNum, elapsedTime);
-
-        // Append the results to the common output file
-        for (int i = start; i < end; i++)
-        {
-            for (int j = 0; j < matrixSize; j++)
-            {
-                fprintf(outputFile, "%d ", result[i][j]);
-            }
-            fprintf(outputFile, "\n");
-        }
-    }
-    else
-    {
-        printf("Parent took %.6f seconds!\n", elapsedTime);
-    }
+    return -1;
 }
 
-int main()
+void signal_ign()
 {
-    int numChildren;
-    pid_t pid;
+    signal(SIGINT, SIG_IGN);
+    signal(SIGQUIT, SIG_IGN);
+}
 
-    char restartChoice; // Variable to store user's choice for restarting the program
+int main(int argc, char *argv[])
+{
+    signal_ign();
 
-    do
+    if (argc != 2)
     {
-        // 사용자로부터 matrix 사이즈 및 자식 프로세스의 수 입력 받기
-        int matrixSize;
-        printf("Enter the matrix size: ");
-        scanf("%d", &matrixSize);
+        fprintf(stderr, "Usage: %s <input_file>\n", argv[0]);
+        return 1;
+    }
 
+    FILE *file = fopen(argv[1], "r");
+    if (file == NULL)
+    {
+        perror("Error opening input file");
+        return 1;
+    }
+
+    int numElements = countElements(file);
+    fseek(file, 0, SEEK_SET);
+    int *data = malloc(numElements * sizeof(int));
+
+    for (int i = 0; i < numElements; i++)
+    {
+        fscanf(file, "%d", &data[i]);
+    }
+    fclose(file);
+
+    char check = 'y';
+    while (1)
+    {
+        int numChildren;
         printf("Enter the number of child processes: ");
         scanf("%d", &numChildren);
 
-        FILE *outputFile = fopen("output.txt", "a");
-        if (outputFile == NULL)
-        {
-            perror("Error opening output file");
-            exit(EXIT_FAILURE);
-        }
+        int goal;
+        printf("Enter the number you want to find: ");
+        scanf("%d", &goal);
 
-        int resultMatrix[matrixSize][matrixSize];
+        int elementsPerChild = numElements / numChildren;
 
+        pid_t pid;
         for (int i = 0; i < numChildren; i++)
         {
             pid = fork();
@@ -111,103 +85,96 @@ int main()
             if (pid == -1)
             {
                 perror("Error in fork");
-                exit(EXIT_FAILURE);
+                exit(1);
             }
 
+            // Child process
             if (pid == 0)
-            { // 자식 프로세스
-                int start = i * (matrixSize / numChildren);
-                int end = (i + 1) * (matrixSize / numChildren);
+            {
+                int start = i * elementsPerChild;
+                int end = (i == numChildren - 1) ? numElements : (i + 1) * elementsPerChild;
 
-                if (i == numChildren - 1) // If it's the last child process
+                // Measure time taken for the search
+                clock_t startTime = clock();
+                int result = sequentialSearch(data, start, end, goal);
+                clock_t endTime = clock();
+
+                if (result != -1)
                 {
-                    end = matrixSize;
+                    printf("[Child] Process %d found %d at index %d (Range: %d to %d)\n", i + 1, goal, result, start, end - 1);
+                }
+                else
+                {
+                    printf("[Child] Process %d did not find %d in the range %d to %d\n", i + 1, goal, start, end - 1);
                 }
 
-                processMatrixMultiplication(start, end, matrixSize, resultMatrix, i + 1, outputFile);
+                sleep(1);
 
-                fclose(outputFile); // Close the file in the child process
-                exit(EXIT_SUCCESS);
+                double elapsedTime = (double)(endTime - startTime) / CLOCKS_PER_SEC;
+                printf("[Child] Process %d took <%.6f> seconds!\n", i + 1, elapsedTime);
+
+                exit(0);
             }
         }
 
-        // 부모 프로세스는 나머지 부분의 행렬 곱셈을 수행
+        // Parent process
         if (pid > 0)
         {
-            // Wait for all child processes to finish
             for (int i = 0; i < numChildren; i++)
             {
                 wait(NULL);
             }
 
-            processMatrixMultiplication(0, matrixSize, matrixSize, resultMatrix, 0, outputFile);
+            clock_t startTime = clock();
+            int result = sequentialSearch(data, 0, numElements - 1, goal);
+            clock_t endTime = clock();
+            double elapsedTime = (double)(endTime - startTime) / CLOCKS_PER_SEC;
+            printf("[Parent] Process took <%.6f> seconds!\n\n", elapsedTime);
 
-            // Find and print the minimum, maximum, and average values in resultMatrix
-            int minVal = INT_MAX;
-            int maxVal = INT_MIN;
+            // Find maximum, minimum, average values
+            int max = data[0];
+            int min = data[0];
             int sum = 0;
 
-            for (int i = 0; i < matrixSize; i++)
+            for (int i = 0; i < numElements; i++)
             {
-                for (int j = 0; j < matrixSize; j++)
-                {
-                    if (resultMatrix[i][j] < minVal)
-                    {
-                        minVal = resultMatrix[i][j];
-                    }
-                    if (resultMatrix[i][j] > maxVal)
-                    {
-                        maxVal = resultMatrix[i][j];
-                    }
-                    sum += resultMatrix[i][j];
-                }
+                sum += data[i];
+                if (data[i] > max)
+                    max = data[i];
+                if (data[i] < min)
+                    min = data[i];
             }
+            double average = (double)sum / numElements;
 
-            double average = (double)sum / (matrixSize * matrixSize);
-
-            endwin();
+            sleep(2);
 
             initscr();
 
-            move(20, 30);
-            printw("Minimum value: %d", minVal);
-            refresh();
-            sleep(1);
-
-            move(21, 30);
-            printw("Maximum value: %d", maxVal);
-            refresh();
-            sleep(1);
-
-            move(22, 30);
-            printw("Average value: %.2f", average);
-            refresh();
-            sleep(1);
-
             standout();
-            move(25, 30);
-            printw("Press 'y' to restart, 'n' to exit ...");
-            refresh();
+            move(10, 20);
+            printw("Minimum value: %d", min);
+            move(11, 20);
+            printw("Maximum value: %d", max);
+            move(12, 20);
+            printw("Average value: %.2f", average);
             standend();
 
-            restartChoice = getch(); // Get user's choice for restarting or exiting
+            move(15, 20);
+            printw("Do you have any more data to look back on? (y/n): ");
+            if (getch() == 'n')
+                check = 'n';
 
-            erase();
+            clear();
             endwin();
-
-            fclose(outputFile); // Close the file in the parent process
-
-            // Delete the file after displaying its contents
-            if (remove("output.txt") == -1)
-            {
-                perror("Error deleting the file");
-                exit(EXIT_FAILURE);
-            }
         }
 
-        printf("\n");
+        if (check == 'n')
+            break;
 
-    } while (restartChoice == 'y');
+        printf("\n");
+    }
+
+    free(data);
 
     return 0;
 }
