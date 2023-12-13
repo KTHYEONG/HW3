@@ -1,3 +1,5 @@
+// Test를 위한 data.txt 이름의 파일 생성
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>

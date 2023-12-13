@@ -164,6 +164,7 @@ int main(int argc, char *argv[])
             if (getch() == 'n')
                 check = 'n';
 
+            sleep(1);
             clear();
             endwin();
         }

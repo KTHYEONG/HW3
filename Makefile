@@ -1,12 +1,5 @@
-CC = gcc
-CFLAGS = -Wall -Wextra
-TARGET = t
-SRC = t.c
-
-all: $(TARGET)
-
-$(TARGET): $(SRC)
-	$(CC) $(CFLAGS) -o $@ $^
+hw3: hw3.c
+	gcc -o hw3 hw3.c -lcurses
 
 clean:
-	rm -f $(TARGET)
+	rm -f hw3
